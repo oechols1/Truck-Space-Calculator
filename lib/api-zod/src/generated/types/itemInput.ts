@@ -5,13 +5,19 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { EquivalenceInput } from './equivalenceInput';
 
 export interface ItemInput {
   /** @minLength 1 */
   name: string;
   /** @minimum 1 */
   unitsPerStack: number;
-  /** @minimum 1 */
-  stacksPerTruck: number;
+  /**
+     * Required unless equivalences are provided
+     * @minimum 1
+     */
+  stacksPerTruck?: number;
   color?: string;
+  /** If provided, capacity is derived from the first base item */
+  equivalences?: EquivalenceInput[];
 }

@@ -5,14 +5,17 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { Equivalence } from './equivalence';
 
 export interface Item {
   id: number;
   name: string;
   /** Units in one full stack */
   unitsPerStack: number;
-  /** Max full stacks of this item in one truck */
+  /** Max full stacks of this item in one truck. For items defined by equivalences this is derived live from the first base item's rules. */
   stacksPerTruck: number;
   /** Hex color used in the truck diagram */
   color: string;
+  /** Relationships defining one unit of this item in terms of base items */
+  equivalences: Equivalence[];
 }

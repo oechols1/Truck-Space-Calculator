@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
-import { inArray } from "drizzle-orm";
-import { db, itemsTable } from "@workspace/db";
 import { CalculateLoadBody, CalculateLoadResponse } from "@workspace/api-zod";
+import { resolveItems } from "../lib/items";
 
 const router: IRouter = Router();
 
@@ -13,16 +12,20 @@ router.post("/loads/calculate", async (req, res): Promise<void> => {
   }
 
   const lines = parsed.data.lines.filter((l) => l.quantity > 0);
-  const itemIds = [...new Set(lines.map((l) => l.itemId))];
 
-  const items = itemIds.length
-    ? await db.select().from(itemsTable).where(inArray(itemsTable.id, itemIds))
-    : [];
-  const itemById = new Map(items.map((i) => [i.id, i]));
+  const allItems = await resolveItems();
+  const itemById = new Map(allItems.map((i) => [i.id, i]));
 
   for (const line of lines) {
-    if (!itemById.has(line.itemId)) {
+    const item = itemById.get(line.itemId);
+    if (!item) {
       res.status(400).json({ error: `Unknown item id: ${line.itemId}` });
+      return;
+    }
+    if (item.stacksPerTruck < 1) {
+      res.status(400).json({
+        error: `A full stack of "${item.name}" does not fit in one truck. Check its relationship or stack rules.`,
+      });
       return;
     }
   }
@@ -65,7 +68,6 @@ router.post("/loads/calculate", async (req, res): Promise<void> => {
       ? 1
       : Math.min(1, Math.max(0, trucksNeeded - totalFraction));
 
-  const allItems = await db.select().from(itemsTable).orderBy(itemsTable.id);
   const remainingRoom = allItems.map((item) => {
     const stacks = Math.floor(remainingFraction * item.stacksPerTruck + 1e-9);
     return {

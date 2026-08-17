@@ -130,6 +130,11 @@ export default function CalculatorPage() {
                           {item.unitsPerStack} / stack
                         </span>
                       </div>
+                      {item.equivalences.length > 0 && (
+                        <p className="text-xs text-muted-foreground font-mono mb-2 -mt-1">
+                          1 = {item.equivalences.map((e) => `${e.baseUnits} ${e.baseItemName}`).join(" = ")}
+                        </p>
+                      )}
                       <div className="flex items-center gap-2">
                         <Button 
                           variant="outline" 

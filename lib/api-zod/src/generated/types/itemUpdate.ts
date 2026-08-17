@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { EquivalenceInput } from './equivalenceInput';
 
 export interface ItemUpdate {
   /** @minLength 1 */
@@ -14,4 +15,6 @@ export interface ItemUpdate {
   /** @minimum 1 */
   stacksPerTruck?: number;
   color?: string;
+  /** Replaces all existing equivalences when provided */
+  equivalences?: EquivalenceInput[];
 }

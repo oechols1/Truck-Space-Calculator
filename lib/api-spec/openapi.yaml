@@ -170,11 +170,39 @@ components:
           description: Units in one full stack
         stacksPerTruck:
           type: integer
-          description: Max full stacks of this item in one truck
+          description: >
+            Max full stacks of this item in one truck. For items defined by
+            equivalences this is derived live from the first base item's rules.
         color:
           type: string
           description: Hex color used in the truck diagram
-      required: [id, name, unitsPerStack, stacksPerTruck, color]
+        equivalences:
+          type: array
+          description: Relationships defining one unit of this item in terms of base items
+          items:
+            $ref: "#/components/schemas/Equivalence"
+      required: [id, name, unitsPerStack, stacksPerTruck, color, equivalences]
+    Equivalence:
+      type: object
+      properties:
+        baseItemId:
+          type: integer
+        baseItemName:
+          type: string
+        baseUnits:
+          type: integer
+          minimum: 1
+          description: One unit of this item equals this many units of the base item
+      required: [baseItemId, baseItemName, baseUnits]
+    EquivalenceInput:
+      type: object
+      properties:
+        baseItemId:
+          type: integer
+        baseUnits:
+          type: integer
+          minimum: 1
+      required: [baseItemId, baseUnits]
     ItemInput:
       type: object
       properties:
@@ -187,9 +215,15 @@ components:
         stacksPerTruck:
           type: integer
           minimum: 1
+          description: Required unless equivalences are provided
         color:
           type: string
-      required: [name, unitsPerStack, stacksPerTruck]
+        equivalences:
+          type: array
+          description: If provided, capacity is derived from the first base item
+          items:
+            $ref: "#/components/schemas/EquivalenceInput"
+      required: [name, unitsPerStack]
     ItemUpdate:
       type: object
       properties:
@@ -204,6 +238,11 @@ components:
           minimum: 1
         color:
           type: string
+        equivalences:
+          type: array
+          description: Replaces all existing equivalences when provided
+          items:
+            $ref: "#/components/schemas/EquivalenceInput"
     LoadInput:
       type: object
       properties:

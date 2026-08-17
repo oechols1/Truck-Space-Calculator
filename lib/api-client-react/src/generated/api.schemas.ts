@@ -13,15 +13,33 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface Equivalence {
+  baseItemId: number;
+  baseItemName: string;
+  /**
+     * One unit of this item equals this many units of the base item
+     * @minimum 1
+     */
+  baseUnits: number;
+}
+
 export interface Item {
   id: number;
   name: string;
   /** Units in one full stack */
   unitsPerStack: number;
-  /** Max full stacks of this item in one truck */
+  /** Max full stacks of this item in one truck. For items defined by equivalences this is derived live from the first base item's rules. */
   stacksPerTruck: number;
   /** Hex color used in the truck diagram */
   color: string;
+  /** Relationships defining one unit of this item in terms of base items */
+  equivalences: Equivalence[];
+}
+
+export interface EquivalenceInput {
+  baseItemId: number;
+  /** @minimum 1 */
+  baseUnits: number;
 }
 
 export interface ItemInput {
@@ -29,9 +47,14 @@ export interface ItemInput {
   name: string;
   /** @minimum 1 */
   unitsPerStack: number;
-  /** @minimum 1 */
-  stacksPerTruck: number;
+  /**
+     * Required unless equivalences are provided
+     * @minimum 1
+     */
+  stacksPerTruck?: number;
   color?: string;
+  /** If provided, capacity is derived from the first base item */
+  equivalences?: EquivalenceInput[];
 }
 
 export interface ItemUpdate {
@@ -42,6 +65,8 @@ export interface ItemUpdate {
   /** @minimum 1 */
   stacksPerTruck?: number;
   color?: string;
+  /** Replaces all existing equivalences when provided */
+  equivalences?: EquivalenceInput[];
 }
 
 export interface LoadLine {

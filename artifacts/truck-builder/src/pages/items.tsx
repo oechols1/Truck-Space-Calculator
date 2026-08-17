@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,14 +22,19 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trash2, Edit2, Plus, Package } from "lucide-react";
+import { Trash2, Edit2, Plus, Package, Link2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 const itemSchema = z.object({
   name: z.string().min(1, "Name is required"),
   unitsPerStack: z.coerce.number().min(1, "Must be at least 1"),
-  stacksPerTruck: z.coerce.number().min(1, "Must be at least 1"),
+  stacksPerTruck: z.coerce.number().min(1, "Must be at least 1").optional(),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color (e.g. #FF0000)"),
+  equivalences: z.array(z.object({
+    baseItemId: z.coerce.number().min(1, "Pick an item"),
+    baseUnits: z.coerce.number().min(1, "Must be at least 1"),
+  })),
 });
 
 type ItemFormValues = z.infer<typeof itemSchema>;
@@ -40,44 +45,74 @@ export default function ItemsPage() {
   const { toast } = useToast();
   
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [mode, setMode] = useState<"direct" | "relationship">("direct");
 
   const createItem = useCreateItem();
   const updateItem = useUpdateItem();
   const deleteItem = useDeleteItem();
 
-  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<ItemFormValues>({
+  const { register, handleSubmit, reset, setValue, watch, control, formState: { errors } } = useForm<ItemFormValues>({
     resolver: zodResolver(itemSchema),
     defaultValues: {
       name: "",
       unitsPerStack: 10,
       stacksPerTruck: 30,
-      color: "#FF5A00"
+      color: "#FF5A00",
+      equivalences: [],
     }
   });
 
+  const { fields, append, remove } = useFieldArray({ control, name: "equivalences" });
+
+  // Items that can serve as a base: direct-capacity items (no equivalences), not the item being edited
+  const baseCandidates = items.filter(
+    (i) => i.equivalences.length === 0 && i.id !== editingId
+  );
+
+  const onError = (verb: string) => (err: any) =>
+    toast({
+      title: `Failed to ${verb} item`,
+      description: err?.data?.error ?? err?.message,
+      variant: "destructive",
+    });
+
   const onSubmit = (data: ItemFormValues) => {
+    const payload =
+      mode === "relationship"
+        ? { name: data.name, unitsPerStack: data.unitsPerStack, color: data.color, equivalences: data.equivalences }
+        : { name: data.name, unitsPerStack: data.unitsPerStack, stacksPerTruck: data.stacksPerTruck, color: data.color, equivalences: [] };
+
+    if (mode === "relationship" && data.equivalences.length === 0) {
+      toast({ title: "Add at least one relationship", variant: "destructive" });
+      return;
+    }
+    if (mode === "direct" && !data.stacksPerTruck) {
+      toast({ title: "Stacks per truck is required", variant: "destructive" });
+      return;
+    }
+
     if (editingId) {
       updateItem.mutate(
-        { id: editingId, data },
+        { id: editingId, data: payload },
         {
           onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: getListItemsQueryKey() });
             toast({ title: "Item updated successfully" });
             resetForm();
           },
-          onError: () => toast({ title: "Failed to update item", variant: "destructive" })
+          onError: onError("update"),
         }
       );
     } else {
       createItem.mutate(
-        { data },
+        { data: payload },
         {
           onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: getListItemsQueryKey() });
             toast({ title: "Item created successfully" });
             resetForm();
           },
-          onError: () => toast({ title: "Failed to create item", variant: "destructive" })
+          onError: onError("create"),
         }
       );
     }
@@ -85,10 +120,15 @@ export default function ItemsPage() {
 
   const handleEdit = (item: any) => {
     setEditingId(item.id);
+    setMode(item.equivalences.length > 0 ? "relationship" : "direct");
     setValue("name", item.name);
     setValue("unitsPerStack", item.unitsPerStack);
     setValue("stacksPerTruck", item.stacksPerTruck);
     setValue("color", item.color);
+    setValue(
+      "equivalences",
+      item.equivalences.map((e: any) => ({ baseItemId: e.baseItemId, baseUnits: e.baseUnits }))
+    );
   };
 
   const handleDelete = (id: number) => {
@@ -100,7 +140,7 @@ export default function ItemsPage() {
             queryClient.invalidateQueries({ queryKey: getListItemsQueryKey() });
             toast({ title: "Item deleted successfully" });
           },
-          onError: () => toast({ title: "Failed to delete item", variant: "destructive" })
+          onError: onError("delete"),
         }
       );
     }
@@ -108,11 +148,13 @@ export default function ItemsPage() {
 
   const resetForm = () => {
     setEditingId(null);
+    setMode("direct");
     reset({
       name: "",
       unitsPerStack: 10,
       stacksPerTruck: 30,
-      color: "#FF5A00"
+      color: "#FF5A00",
+      equivalences: [],
     });
   };
 
@@ -139,12 +181,93 @@ export default function ItemsPage() {
                 <Input id="unitsPerStack" type="number" {...register("unitsPerStack")} />
                 {errors.unitsPerStack && <p className="text-destructive text-sm">{errors.unitsPerStack.message}</p>}
               </div>
-              
+
+              {/* Capacity mode toggle */}
               <div className="space-y-2">
-                <Label htmlFor="stacksPerTruck">Stacks per Truck (Max)</Label>
-                <Input id="stacksPerTruck" type="number" {...register("stacksPerTruck")} />
-                {errors.stacksPerTruck && <p className="text-destructive text-sm">{errors.stacksPerTruck.message}</p>}
+                <Label>Truck Capacity</Label>
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-md bg-muted">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("direct");
+                      setValue("equivalences", []);
+                    }}
+                    className={cn(
+                      "px-2 py-1.5 rounded text-sm font-bold transition-colors",
+                      mode === "direct" ? "bg-background shadow-sm" : "text-muted-foreground"
+                    )}
+                  >
+                    Direct
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("relationship")}
+                    className={cn(
+                      "px-2 py-1.5 rounded text-sm font-bold transition-colors flex items-center justify-center gap-1.5",
+                      mode === "relationship" ? "bg-background shadow-sm" : "text-muted-foreground"
+                    )}
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    Relationship
+                  </button>
+                </div>
               </div>
+
+              {mode === "direct" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="stacksPerTruck">Stacks per Truck (Max)</Label>
+                  <Input id="stacksPerTruck" type="number" {...register("stacksPerTruck")} />
+                  {errors.stacksPerTruck && <p className="text-destructive text-sm">{errors.stacksPerTruck.message}</p>}
+                </div>
+              ) : (
+                <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+                  <p className="text-xs text-muted-foreground">
+                    Define 1 unit of this item in terms of existing items. Capacity
+                    is derived automatically from the first relationship.
+                  </p>
+                  {fields.map((field, index) => (
+                    <div key={field.id} className="flex items-center gap-2">
+                      <span className="text-sm font-mono shrink-0">1 =</span>
+                      <Input
+                        type="number"
+                        className="w-20 h-9 font-mono"
+                        {...register(`equivalences.${index}.baseUnits`)}
+                      />
+                      <select
+                        className="flex-1 h-9 rounded-md border border-input bg-background px-2 text-sm"
+                        {...register(`equivalences.${index}.baseItemId`)}
+                      >
+                        <option value="">Select item...</option>
+                        {baseCandidates.map((i) => (
+                          <option key={i.id} value={i.id}>{i.name}</option>
+                        ))}
+                      </select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => remove(index)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  {errors.equivalences && (
+                    <p className="text-destructive text-sm">Each relationship needs an item and units.</p>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => append({ baseItemId: 0, baseUnits: 1 })}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add relationship
+                  </Button>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="color">Diagram Color (Hex)</Label>
@@ -214,9 +337,26 @@ export default function ItemsPage() {
                           title={item.color}
                         />
                       </TableCell>
-                      <TableCell className="font-medium text-foreground">{item.name}</TableCell>
+                      <TableCell>
+                        <div className="font-medium text-foreground">{item.name}</div>
+                        {item.equivalences.length > 0 && (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                            <Link2 className="h-3 w-3 shrink-0" />
+                            <span className="font-mono">
+                              1 = {item.equivalences.map((e) => `${e.baseUnits} ${e.baseItemName}`).join(" = ")}
+                            </span>
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-mono">{item.unitsPerStack}</TableCell>
-                      <TableCell className="text-right font-mono">{item.stacksPerTruck}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {item.stacksPerTruck}
+                        {item.equivalences.length > 0 && (
+                          <span className="text-xs text-muted-foreground ml-1" title="Derived from relationship">
+                            (derived)
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button 

@@ -20,12 +20,20 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary List item types
  */
+
+
+
 export const ListItemsResponseItem = zod.object({
   "id": zod.int(),
   "name": zod.string(),
   "unitsPerStack": zod.int().describe('Units in one full stack'),
-  "stacksPerTruck": zod.int().describe('Max full stacks of this item in one truck'),
-  "color": zod.string().describe('Hex color used in the truck diagram')
+  "stacksPerTruck": zod.int().describe('Max full stacks of this item in one truck. For items defined by equivalences this is derived live from the first base item\'s rules.\n'),
+  "color": zod.string().describe('Hex color used in the truck diagram'),
+  "equivalences": zod.array(zod.object({
+  "baseItemId": zod.int(),
+  "baseItemName": zod.string(),
+  "baseUnits": zod.int().min(1).describe('One unit of this item equals this many units of the base item')
+})).describe('Relationships defining one unit of this item in terms of base items')
 })
 export const ListItemsResponse = zod.array(ListItemsResponseItem)
 
@@ -38,19 +46,32 @@ export const ListItemsResponse = zod.array(ListItemsResponseItem)
 
 
 
+
 export const CreateItemBody = zod.object({
   "name": zod.string().min(1),
   "unitsPerStack": zod.int().min(1),
-  "stacksPerTruck": zod.int().min(1),
-  "color": zod.string().optional()
+  "stacksPerTruck": zod.int().min(1).optional().describe('Required unless equivalences are provided'),
+  "color": zod.string().optional(),
+  "equivalences": zod.array(zod.object({
+  "baseItemId": zod.int(),
+  "baseUnits": zod.int().min(1)
+})).optional().describe('If provided, capacity is derived from the first base item')
 })
+
+
+
 
 export const CreateItemResponse = zod.object({
   "id": zod.int(),
   "name": zod.string(),
   "unitsPerStack": zod.int().describe('Units in one full stack'),
-  "stacksPerTruck": zod.int().describe('Max full stacks of this item in one truck'),
-  "color": zod.string().describe('Hex color used in the truck diagram')
+  "stacksPerTruck": zod.int().describe('Max full stacks of this item in one truck. For items defined by equivalences this is derived live from the first base item\'s rules.\n'),
+  "color": zod.string().describe('Hex color used in the truck diagram'),
+  "equivalences": zod.array(zod.object({
+  "baseItemId": zod.int(),
+  "baseItemName": zod.string(),
+  "baseUnits": zod.int().min(1).describe('One unit of this item equals this many units of the base item')
+})).describe('Relationships defining one unit of this item in terms of base items')
 })
 
 
@@ -66,19 +87,32 @@ export const UpdateItemParams = zod.object({
 
 
 
+
 export const UpdateItemBody = zod.object({
   "name": zod.string().min(1).optional(),
   "unitsPerStack": zod.int().min(1).optional(),
   "stacksPerTruck": zod.int().min(1).optional(),
-  "color": zod.string().optional()
+  "color": zod.string().optional(),
+  "equivalences": zod.array(zod.object({
+  "baseItemId": zod.int(),
+  "baseUnits": zod.int().min(1)
+})).optional().describe('Replaces all existing equivalences when provided')
 })
+
+
+
 
 export const UpdateItemResponse = zod.object({
   "id": zod.int(),
   "name": zod.string(),
   "unitsPerStack": zod.int().describe('Units in one full stack'),
-  "stacksPerTruck": zod.int().describe('Max full stacks of this item in one truck'),
-  "color": zod.string().describe('Hex color used in the truck diagram')
+  "stacksPerTruck": zod.int().describe('Max full stacks of this item in one truck. For items defined by equivalences this is derived live from the first base item\'s rules.\n'),
+  "color": zod.string().describe('Hex color used in the truck diagram'),
+  "equivalences": zod.array(zod.object({
+  "baseItemId": zod.int(),
+  "baseItemName": zod.string(),
+  "baseUnits": zod.int().min(1).describe('One unit of this item equals this many units of the base item')
+})).describe('Relationships defining one unit of this item in terms of base items')
 })
 
 

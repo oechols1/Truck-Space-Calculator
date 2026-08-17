@@ -10,8 +10,20 @@ export const itemsTable = pgTable("items", {
   color: text("color").notNull(),
 });
 
+export const itemEquivalencesTable = pgTable("item_equivalences", {
+  id: serial("id").primaryKey(),
+  itemId: integer("item_id")
+    .notNull()
+    .references(() => itemsTable.id, { onDelete: "cascade" }),
+  baseItemId: integer("base_item_id")
+    .notNull()
+    .references(() => itemsTable.id, { onDelete: "cascade" }),
+  baseUnits: integer("base_units").notNull(),
+});
+
 export const insertItemSchema = createInsertSchema(itemsTable).omit({
   id: true,
 });
 export type InsertItem = z.infer<typeof insertItemSchema>;
 export type Item = typeof itemsTable.$inferSelect;
+export type ItemEquivalence = typeof itemEquivalencesTable.$inferSelect;

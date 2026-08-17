@@ -33,6 +33,7 @@ An internal tool for the warehouse/office to check whether a mix of product quan
 - Truck: standard 53' trailer, loaded in FULL stacks only; quantities round UP to full stacks.
 - Half Pack: 68 stacks of 10 (680/truck); Full Pack: 34 stacks of 10 (340/truck); Bags: 34 stacks of 11 (374/truck).
 - Mixed loads: each item's stacks consume stacksNeeded/stacksPerTruck of a truck; fits when combined ≤ 100%.
+- Items can be derived via relationships (e.g. 1 Pallet = 20 Half Pack): capacity is derived live from the FIRST relationship's base item. Base items must be direct (no chains), can't be deleted while in use, and can't become derived while others depend on them.
 
 ## Architecture decisions
 
