@@ -1,6 +1,6 @@
-# [Project name]
+# Truck Fit Calculator
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An internal tool for the warehouse/office to check whether a mix of product quantities fits in a standard 53' trailer, with capacity math based on full-stack loading rules.
 
 ## Run & Operate
 
@@ -22,7 +22,17 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/truck-builder/` — web frontend (calculator at `/`, item management at `/items`)
+- `artifacts/api-server/src/routes/items.ts` — item type CRUD
+- `artifacts/api-server/src/routes/loads.ts` — load fit calculation (single source of business logic)
+- `lib/db/src/schema/items.ts` — items table
+- `lib/api-spec/openapi.yaml` — API contract (codegen source of truth)
+
+## Capacity rules
+
+- Truck: standard 53' trailer, loaded in FULL stacks only; quantities round UP to full stacks.
+- Half Pack: 68 stacks of 10 (680/truck); Full Pack: 34 stacks of 10 (340/truck); Bags: 34 stacks of 11 (374/truck).
+- Mixed loads: each item's stacks consume stacksNeeded/stacksPerTruck of a truck; fits when combined ≤ 100%.
 
 ## Architecture decisions
 
@@ -38,7 +48,7 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The api-spec codegen script rewrites the generated zod import to `zod/v4` (orval emits zod v4 API); don't remove the sed step in `lib/api-spec/package.json`.
 
 ## Pointers
 

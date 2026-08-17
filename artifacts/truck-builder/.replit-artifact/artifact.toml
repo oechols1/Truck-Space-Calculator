@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Truck Fit Calculator"
+description = "An internal calculator for the warehouse and office to check whether a mix of Half Packs, Full Packs, and Bags fits in a standard 53' trailer. Shows a fits/doesn't-fit verdict, capacity used, stack breakdown, trucks needed, and a visual trailer diagram, with an item management screen for adjusting stack rules."
+version = "1.0.0"
+id = "artifacts/truck-builder"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19813
+
+[services.development]
+run = "pnpm --filter @workspace/truck-builder run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/truck-builder", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/truck-builder/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19813"
+BASE_PATH = "/"

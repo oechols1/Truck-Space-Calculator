@@ -10,6 +10,10 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: items
+    description: Item type management
+  - name: loads
+    description: Load fit calculation
 paths:
   /healthz:
     get:
@@ -24,6 +28,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /items:
+    get:
+      operationId: listItems
+      tags: [items]
+      summary: List item types
+      responses:
+        "200":
+          description: Item types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Item"
+    post:
+      operationId: createItem
+      tags: [items]
+      summary: Create an item type
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /items/{id}:
+    patch:
+      operationId: updateItem
+      tags: [items]
+      summary: Update an item type
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteItem
+      tags: [items]
+      summary: Delete an item type
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /loads/calculate:
+    post:
+      operationId: calculateLoad
+      tags: [loads]
+      summary: Calculate whether a load fits in the truck
+      description: >
+        Computes stacks required per item (rounding up to full stacks),
+        the fraction of truck capacity used, whether the load fits in one
+        truck, trucks needed, and remaining room per item type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoadInput"
+      responses:
+        "200":
+          description: Calculation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoadResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +151,132 @@ components:
           type: string
       required:
         - status
-
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+    Item:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        unitsPerStack:
+          type: integer
+          description: Units in one full stack
+        stacksPerTruck:
+          type: integer
+          description: Max full stacks of this item in one truck
+        color:
+          type: string
+          description: Hex color used in the truck diagram
+      required: [id, name, unitsPerStack, stacksPerTruck, color]
+    ItemInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        unitsPerStack:
+          type: integer
+          minimum: 1
+        stacksPerTruck:
+          type: integer
+          minimum: 1
+        color:
+          type: string
+      required: [name, unitsPerStack, stacksPerTruck]
+    ItemUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        unitsPerStack:
+          type: integer
+          minimum: 1
+        stacksPerTruck:
+          type: integer
+          minimum: 1
+        color:
+          type: string
+    LoadInput:
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoadLine"
+      required: [lines]
+    LoadLine:
+      type: object
+      properties:
+        itemId:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 0
+      required: [itemId, quantity]
+    LoadResult:
+      type: object
+      properties:
+        fits:
+          type: boolean
+          description: Whether the entire load fits in one truck
+        capacityUsedPct:
+          type: number
+          description: Percent of one truck's capacity used (can exceed 100)
+        trucksNeeded:
+          type: integer
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoadResultLine"
+        remainingRoom:
+          type: array
+          description: How many more full stacks of each item type fit in the remaining space of the last truck
+          items:
+            $ref: "#/components/schemas/RemainingRoom"
+      required: [fits, capacityUsedPct, trucksNeeded, lines, remainingRoom]
+    LoadResultLine:
+      type: object
+      properties:
+        itemId:
+          type: integer
+        itemName:
+          type: string
+        color:
+          type: string
+        quantity:
+          type: integer
+        stacksNeeded:
+          type: integer
+          description: Full stacks required (rounded up)
+        roundedUp:
+          type: boolean
+          description: True when quantity did not divide evenly into full stacks
+        roundedUpTo:
+          type: integer
+          description: The quantity after rounding up to full stacks
+        capacityFractionPct:
+          type: number
+          description: Percent of one truck this line consumes
+      required: [itemId, itemName, color, quantity, stacksNeeded, roundedUp, roundedUpTo, capacityFractionPct]
+    RemainingRoom:
+      type: object
+      properties:
+        itemId:
+          type: integer
+        itemName:
+          type: string
+        stacks:
+          type: integer
+          description: Additional full stacks of this item that still fit
+        units:
+          type: integer
+          description: Additional units (stacks * unitsPerStack)
+      required: [itemId, itemName, stacks, units]
