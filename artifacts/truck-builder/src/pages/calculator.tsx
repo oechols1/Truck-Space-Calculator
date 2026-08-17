@@ -306,8 +306,10 @@ export default function CalculatorPage() {
               {/* REMAINING ROOM */}
               <Card className="border-border shadow-sm">
                 <CardHeader className="py-4 border-b">
-                  <CardTitle className="text-lg">Remaining Room</CardTitle>
-                  <CardDescription>What else fits in the final truck</CardDescription>
+                  <CardTitle className="text-lg">To Fill the Truck</CardTitle>
+                  <CardDescription>
+                    How much more of each type would fill the remaining space (pick one type)
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
                   {result.remainingRoom.length > 0 ? (
@@ -315,8 +317,8 @@ export default function CalculatorPage() {
                       <TableHeader className="bg-muted/30">
                         <TableRow>
                           <TableHead>Item</TableHead>
-                          <TableHead className="text-right">Max Extra Stacks</TableHead>
-                          <TableHead className="text-right">Extra Units</TableHead>
+                          <TableHead className="text-right">Stacks Needed</TableHead>
+                          <TableHead className="text-right">Units Needed</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
