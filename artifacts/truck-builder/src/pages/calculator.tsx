@@ -224,6 +224,21 @@ export default function CalculatorPage() {
                 </div>
               </div>
 
+              {/* Partial truck flag */}
+              {(() => {
+                const lastTruckPct = result.capacityUsedPct - (result.trucksNeeded - 1) * 100;
+                const isPartial = result.trucksNeeded > 0 && lastTruckPct < 99.995;
+                if (!isPartial) return null;
+                return (
+                  <div className="absolute top-0 left-0 right-0 z-10 flex justify-center">
+                    <span className="inline-flex items-center gap-1.5 rounded-b-md bg-amber-500 text-amber-950 px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-sm">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Partial truck — {result.trucksNeeded > 1 ? `trailer ${result.trucksNeeded} ` : ""}only {lastTruckPct.toFixed(1)}% full
+                    </span>
+                  </div>
+                );
+              })()}
+
               {/* Loading State Overlay */}
               {isCalculating && (
                 <div className="absolute inset-0 bg-background/50 backdrop-blur-[2px] z-20 flex items-center justify-center">
@@ -395,6 +410,30 @@ function TruckDiagram({ result, items }: { result: any, items: any[] }) {
                   items={items} 
                 />
               </div>
+
+              {/* Empty space flag on the last (partial) trailer */}
+              {truckIndex === result.trucksNeeded - 1 && (() => {
+                const lastTruckPct = result.capacityUsedPct - (result.trucksNeeded - 1) * 100;
+                const emptyPct = 100 - lastTruckPct;
+                if (emptyPct < 0.005) return null;
+                return (
+                  <div
+                    className="absolute top-0 bottom-0 right-0 flex items-center justify-center"
+                    style={{
+                      width: `${emptyPct}%`,
+                      backgroundImage:
+                        "repeating-linear-gradient(45deg, rgba(245,158,11,0.25) 0, rgba(245,158,11,0.25) 6px, transparent 6px, transparent 12px)",
+                    }}
+                    title={`Empty space: ${emptyPct.toFixed(1)}% of this trailer`}
+                  >
+                    {emptyPct > 12 && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500 bg-background/70 px-1.5 py-0.5 rounded">
+                        {emptyPct.toFixed(0)}% empty
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Grid lines (10% marks) */}
               <div className="absolute inset-0 pointer-events-none opacity-20">
