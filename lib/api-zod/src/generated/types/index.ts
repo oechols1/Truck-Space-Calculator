@@ -17,4 +17,6 @@ export * from './loadInput';
 export * from './loadLine';
 export * from './loadResult';
 export * from './loadResultLine';
+export * from './plan';
+export * from './planInput';
 export * from './remainingRoom';

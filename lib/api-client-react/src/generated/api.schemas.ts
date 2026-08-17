@@ -75,6 +75,13 @@ export interface LoadLine {
   quantity: number;
 }
 
+export interface Plan {
+  id: number;
+  name: string;
+  lines: LoadLine[];
+  createdAt: string;
+  updatedAt: string;
+}
 export interface LoadInput {
   lines: LoadLine[];
 }
@@ -114,3 +121,9 @@ export interface LoadResult {
   remainingRoom: RemainingRoom[];
 }
 
+
+export interface PlanInput {
+  /** @minLength 1 */
+  name: string;
+  lines: LoadLine[];
+}

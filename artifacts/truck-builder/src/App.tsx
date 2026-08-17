@@ -8,6 +8,7 @@ import { Layout } from '@/components/layout';
 
 import CalculatorPage from '@/pages/calculator';
 import ItemsPage from '@/pages/items';
+import PlansPage from '@/pages/plans';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ function Router() {
         <Switch>
           <Route path="/" component={CalculatorPage} />
           <Route path="/items" component={ItemsPage} />
+          <Route path="/plans" component={PlansPage} />
           <Route component={NotFound} />
         </Switch>
       </RoutedErrorBoundary>

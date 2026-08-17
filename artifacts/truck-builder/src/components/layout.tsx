@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Truck, Package, Activity } from "lucide-react";
+import { Truck, Package, Activity, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface LayoutProps {
@@ -44,6 +44,18 @@ export function Layout({ children }: LayoutProps) {
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4" />
                   Item Types
+                </div>
+              </Link>
+              <Link
+                href="/plans"
+                className={cn(
+                  "px-4 py-2 rounded-md text-sm font-medium transition-colors hover:bg-muted hover:text-foreground",
+                  location === "/plans" ? "bg-muted text-foreground" : "text-muted-foreground"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4" />
+                  Saved Plans
                 </div>
               </Link>
             </nav>

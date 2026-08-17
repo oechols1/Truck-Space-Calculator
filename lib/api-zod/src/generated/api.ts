@@ -22,7 +22,6 @@ export const HealthCheckResponse = zod.object({
  */
 
 
-
 export const ListItemsResponseItem = zod.object({
   "id": zod.int(),
   "name": zod.string(),
@@ -43,10 +42,6 @@ export const ListItemsResponse = zod.array(ListItemsResponseItem)
  */
 
 
-
-
-
-
 export const CreateItemBody = zod.object({
   "name": zod.string().min(1),
   "unitsPerStack": zod.int().min(1),
@@ -57,8 +52,6 @@ export const CreateItemBody = zod.object({
   "baseUnits": zod.int().min(1)
 })).optional().describe('If provided, capacity is derived from the first base item')
 })
-
-
 
 
 export const CreateItemResponse = zod.object({
@@ -83,11 +76,6 @@ export const UpdateItemParams = zod.object({
 })
 
 
-
-
-
-
-
 export const UpdateItemBody = zod.object({
   "name": zod.string().min(1).optional(),
   "unitsPerStack": zod.int().min(1).optional(),
@@ -98,8 +86,6 @@ export const UpdateItemBody = zod.object({
   "baseUnits": zod.int().min(1)
 })).optional().describe('Replaces all existing equivalences when provided')
 })
-
-
 
 
 export const UpdateItemResponse = zod.object({
@@ -125,13 +111,15 @@ export const DeleteItemParams = zod.object({
 
 export const DeleteItemResponse = zod.void()
 
-
+/**
+ * @summary List saved load plans
+ */
+export const listPlansResponseLinesItemQuantityMin = 0;
 /**
  * Computes stacks required per item (rounding up to full stacks), the fraction of truck capacity used, whether the load fits in one truck, trucks needed, and remaining room per item type.
  * @summary Calculate whether a load fits in the truck
  */
 export const calculateLoadBodyLinesItemQuantityMin = 0;
-
 
 
 export const CalculateLoadBody = zod.object({
@@ -164,3 +152,101 @@ export const CalculateLoadResponse = zod.object({
 })
 
 
+export const createPlanResponseLinesItemQuantityMin = 0;
+
+export const UpdatePlanResponse = zod.object({
+  "id": zod.int(),
+  "name": zod.string(),
+  "lines": zod.array(zod.object({
+  "itemId": zod.int(),
+  "quantity": zod.int().min(updatePlanResponseLinesItemQuantityMin)
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+export const updatePlanResponseLinesItemQuantityMin = 0;
+
+export const DeletePlanResponse = zod.void()
+
+/**
+ * @summary Update a saved load plan
+ */
+export const UpdatePlanParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const ListPlansResponse = zod.array(ListPlansResponseItem)
+
+export const ListPlansResponseItem = zod.object({
+  "id": zod.int(),
+  "name": zod.string(),
+  "lines": zod.array(zod.object({
+  "itemId": zod.int(),
+  "quantity": zod.int().min(listPlansResponseLinesItemQuantityMin)
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+/**
+ * @summary Get a saved load plan
+ */
+export const GetPlanParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const updatePlanBodyLinesItemQuantityMin = 0;
+
+/**
+ * @summary Save a new load plan
+ */
+
+export const createPlanBodyLinesItemQuantityMin = 0;
+
+export const getPlanResponseLinesItemQuantityMin = 0;
+
+/**
+ * @summary Delete a saved load plan
+ */
+export const DeletePlanParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const CreatePlanResponse = zod.object({
+  "id": zod.int(),
+  "name": zod.string(),
+  "lines": zod.array(zod.object({
+  "itemId": zod.int(),
+  "quantity": zod.int().min(createPlanResponseLinesItemQuantityMin)
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+export const GetPlanResponse = zod.object({
+  "id": zod.int(),
+  "name": zod.string(),
+  "lines": zod.array(zod.object({
+  "itemId": zod.int(),
+  "quantity": zod.int().min(getPlanResponseLinesItemQuantityMin)
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+export const CreatePlanBody = zod.object({
+  "name": zod.string().min(1),
+  "lines": zod.array(zod.object({
+  "itemId": zod.int(),
+  "quantity": zod.int().min(createPlanBodyLinesItemQuantityMin)
+}))
+})
+
+export const UpdatePlanBody = zod.object({
+  "name": zod.string().min(1),
+  "lines": zod.array(zod.object({
+  "itemId": zod.int(),
+  "quantity": zod.int().min(updatePlanBodyLinesItemQuantityMin)
+}))
+})

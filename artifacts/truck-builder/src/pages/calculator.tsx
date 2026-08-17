@@ -1,31 +1,55 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { 
-  useListItems, 
-  getListItemsQueryKey, 
-  useCalculateLoad 
+import { useState, useEffect, useRef } from "react";
+import { useLocation, useSearch } from "wouter";
+import {
+  useListItems,
+  getListItemsQueryKey,
+  useCalculateLoad,
+  useGetPlan,
+  getGetPlanQueryKey,
+  useCreatePlan,
+  useUpdatePlan,
+  getListPlansQueryKey,
 } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import type { Plan } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
-import { 
-  Truck, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Info,
-  ArrowRight,
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Truck,
+  AlertTriangle,
+  CheckCircle2,
   PackageOpen,
   Plus,
-  Minus
+  Minus,
+  Save,
+  Share2,
+  Pencil,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -39,33 +63,71 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export default function CalculatorPage() {
-  const { data: items = [], isLoading: itemsLoading } = useListItems({ 
-    query: { queryKey: getListItemsQueryKey() } 
+  const [, navigate] = useLocation();
+  const search = useSearch();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Parse plan ID from URL search params
+  const searchParams = new URLSearchParams(search);
+  const planIdParam = searchParams.get("plan");
+  const planId = planIdParam ? Number(planIdParam) : null;
+
+  const { data: items = [], isLoading: itemsLoading } = useListItems({
+    query: { queryKey: getListItemsQueryKey() },
   });
-  
+
+  // Load plan from API if planId is in URL
+  const { data: loadedPlan } = useGetPlan(planId ?? 0, {
+    query: {
+      queryKey: getGetPlanQueryKey(planId ?? 0),
+      enabled: planId !== null && planId > 0,
+    },
+  });
+
   const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [activePlan, setActivePlan] = useState<Plan | null>(null);
+
+  // Track whether quantities were loaded from the plan (to avoid re-triggering)
+  const planLoadedRef = useRef<number | null>(null);
+
+  // When plan data arrives and it's a newly loaded plan, populate quantities
+  useEffect(() => {
+    if (loadedPlan && planId !== null && planLoadedRef.current !== planId) {
+      planLoadedRef.current = planId;
+      setActivePlan(loadedPlan);
+      const q: Record<number, number> = {};
+      for (const line of loadedPlan.lines) {
+        if (line.quantity > 0) q[line.itemId] = line.quantity;
+      }
+      setQuantities(q);
+    }
+  }, [loadedPlan, planId]);
+
+  // Clear plan state when URL has no plan param
+  useEffect(() => {
+    if (planId === null) {
+      planLoadedRef.current = null;
+      setActivePlan(null);
+    }
+  }, [planId]);
+
   const debouncedQuantities = useDebounce(quantities, 300);
-  
   const calculateLoad = useCalculateLoad();
-  
-  // Keep track of the last result to avoid flashing empty state
   const lastResultRef = useRef<any>(null);
 
   useEffect(() => {
-    // Only calculate if we have some quantities entered
-    const hasItems = Object.values(debouncedQuantities).some(q => q > 0);
-    
+    const hasItems = Object.values(debouncedQuantities).some((q) => q > 0);
     if (hasItems) {
       const lines = Object.entries(debouncedQuantities)
         .filter(([_, q]) => q > 0)
         .map(([id, q]) => ({ itemId: Number(id), quantity: q }));
-        
       calculateLoad.mutate(
         { data: { lines } },
         {
           onSuccess: (data) => {
             lastResultRef.current = data;
-          }
+          },
         }
       );
     } else {
@@ -75,435 +137,609 @@ export default function CalculatorPage() {
 
   const handleQuantityChange = (id: number, val: string) => {
     const num = parseInt(val, 10);
-    setQuantities(prev => ({
+    setQuantities((prev) => ({
       ...prev,
-      [id]: isNaN(num) ? 0 : Math.max(0, num)
+      [id]: isNaN(num) ? 0 : Math.max(0, num),
     }));
   };
 
   const handleIncrement = (id: number, amount: number) => {
-    setQuantities(prev => ({
+    setQuantities((prev) => ({
       ...prev,
-      [id]: (prev[id] || 0) + amount
+      [id]: Math.max(0, (prev[id] || 0) + amount),
     }));
   };
 
-  const result = calculateLoad.isPending ? lastResultRef.current : (lastResultRef.current || null);
+  const handleClearAll = () => {
+    setQuantities({});
+    setActivePlan(null);
+    navigate("/");
+  };
+
+  const result = calculateLoad.isPending
+    ? lastResultRef.current
+    : lastResultRef.current || null;
   const isCalculating = calculateLoad.isPending;
 
+  // Save / Update plan dialog
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [planName, setPlanName] = useState("");
+
+  const createPlan = useCreatePlan();
+  const updatePlan = useUpdatePlan();
+
+  const currentLines = Object.entries(quantities)
+    .filter(([_, q]) => q > 0)
+    .map(([id, q]) => ({ itemId: Number(id), quantity: q }));
+
+  const handleOpenSaveDialog = () => {
+    setPlanName(activePlan?.name ?? "");
+    setSaveDialogOpen(true);
+  };
+
+  const handleSave = () => {
+    if (!planName.trim()) return;
+
+    if (activePlan) {
+      // Update existing plan
+      updatePlan.mutate(
+        { id: activePlan.id, data: { name: planName.trim(), lines: currentLines } },
+        {
+          onSuccess: (updated) => {
+            setActivePlan(updated);
+            queryClient.invalidateQueries({ queryKey: getListPlansQueryKey() });
+            setSaveDialogOpen(false);
+            toast({ title: "Plan updated", description: `"${updated.name}" saved.` });
+          },
+          onError: () => {
+            toast({
+              title: "Save failed",
+              description: "Could not update the plan.",
+              variant: "destructive",
+            });
+          },
+        }
+      );
+    } else {
+      // Create new plan
+      createPlan.mutate(
+        { data: { name: planName.trim(), lines: currentLines } },
+        {
+          onSuccess: (created) => {
+            setActivePlan(created);
+            queryClient.invalidateQueries({ queryKey: getListPlansQueryKey() });
+            setSaveDialogOpen(false);
+            navigate(`/?plan=${created.id}`);
+            toast({ title: "Plan saved", description: `"${created.name}" saved.` });
+          },
+          onError: () => {
+            toast({
+              title: "Save failed",
+              description: "Could not save the plan.",
+              variant: "destructive",
+            });
+          },
+        }
+      );
+    }
+  };
+
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(
+      () => toast({ title: "Link copied!", description: "Share this URL to open this plan." }),
+      () => {
+        // Fallback for non-secure contexts
+        const input = document.createElement("input");
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        document.body.removeChild(input);
+        toast({ title: "Link copied!", description: "Share this URL to open this plan." });
+      }
+    );
+  };
+
+  const isSaving = createPlan.isPending || updatePlan.isPending;
+
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 pb-20">
-      {/* LEFT COLUMN: Data Entry */}
-      <div className="xl:col-span-4 space-y-6">
-        <Card className="border-border shadow-sm sticky top-24">
-          <CardHeader className="bg-muted/30 border-b pb-4">
-            <CardTitle className="text-xl flex items-center gap-2">
-              <PackageOpen className="h-5 w-5 text-primary" />
-              Load Quantities
-            </CardTitle>
-            <CardDescription>
-              Enter units needed. Calculates live.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            {itemsLoading ? (
-              <div className="p-8 text-center text-muted-foreground">Loading items...</div>
-            ) : items.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">
-                No items configured. Go to Item Types to add some.
-              </div>
-            ) : (
-              <div className="divide-y">
-                {items.map(item => {
-                  const qty = quantities[item.id] || 0;
-                  return (
-                    <div key={item.id} className="p-4 hover:bg-muted/10 transition-colors">
-                      <div className="flex justify-between items-center mb-2">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-3 h-3 rounded-sm border" 
-                            style={{ backgroundColor: item.color }} 
-                          />
-                          <span className="font-bold text-foreground">{item.name}</span>
+    <>
+      {/* Active plan banner */}
+      {activePlan && (
+        <div className="mb-4 px-4 py-2.5 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Save className="h-4 w-4 text-primary shrink-0" />
+            <span className="text-muted-foreground">Viewing plan:</span>
+            <span className="font-bold text-foreground">{activePlan.name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleShare}>
+              <Share2 className="h-3.5 w-3.5 mr-1" />
+              Share
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleOpenSaveDialog}>
+              <Pencil className="h-3.5 w-3.5 mr-1" />
+              Rename / Save
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={handleClearAll}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 pb-20">
+        {/* LEFT COLUMN: Data Entry */}
+        <div className="xl:col-span-4 space-y-6">
+          <Card className="border-border shadow-sm sticky top-24">
+            <CardHeader className="bg-muted/30 border-b pb-4">
+              <CardTitle className="text-xl flex items-center gap-2">
+                <PackageOpen className="h-5 w-5 text-primary" />
+                Load Quantities
+              </CardTitle>
+              <CardDescription>Enter units needed. Calculates live.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {itemsLoading ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  Loading items...
+                </div>
+              ) : items.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  No items configured. Go to Item Types to add some.
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {items.map((item) => {
+                    const qty = quantities[item.id] || 0;
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-4 hover:bg-muted/10 transition-colors"
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-sm border"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className="font-bold text-foreground">
+                              {item.name}
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {item.unitsPerStack} / stack
+                          </span>
                         </div>
-                        <span className="text-xs text-muted-foreground font-mono">
-                          {item.unitsPerStack} / stack
-                        </span>
+                        {item.equivalences.length > 0 && (
+                          <p className="text-xs text-muted-foreground font-mono mb-2 -mt-1">
+                            1 = {item.equivalences.map((e) => `${e.baseUnits} ${e.baseItemName}`).join(" = ")}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleIncrement(item.id, -1)}
+                            disabled={qty <= 0}
+                            className="h-12 w-12 shrink-0 rounded-l-md"
+                          >
+                            <Minus className="h-4 w-4" />
+                          </Button>
+                          <Input
+                            type="number"
+                            value={qty || ""}
+                            onChange={(e) =>
+                              handleQuantityChange(item.id, e.target.value)
+                            }
+                            className="h-12 text-center text-xl font-mono font-bold bg-background shadow-inner"
+                            placeholder="0"
+                          />
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleIncrement(item.id, 1)}
+                            className="h-12 w-12 shrink-0 rounded-r-md"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                      {item.equivalences.length > 0 && (
-                        <p className="text-xs text-muted-foreground font-mono mb-2 -mt-1">
-                          1 = {item.equivalences.map((e) => `${e.baseUnits} ${e.baseItemName}`).join(" = ")}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="icon"
-                          onClick={() => handleIncrement(item.id, -1)}
-                          disabled={qty <= 0}
-                          className="h-12 w-12 shrink-0 rounded-l-md"
-                        >
-                          <Minus className="h-4 w-4" />
-                        </Button>
-                        <Input
-                          type="number"
-                          value={qty || ""}
-                          onChange={(e) => handleQuantityChange(item.id, e.target.value)}
-                          className="h-12 text-center text-xl font-mono font-bold bg-background shadow-inner"
-                          placeholder="0"
-                        />
-                        <Button 
-                          variant="outline" 
-                          size="icon"
-                          onClick={() => handleIncrement(item.id, 1)}
-                          className="h-12 w-12 shrink-0 rounded-r-md"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            
-            <div className="p-4 bg-muted/30 border-t">
-              <Button 
-                variant="ghost" 
-                className="w-full text-muted-foreground"
-                onClick={() => setQuantities({})}
-              >
-                Clear All
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* RIGHT COLUMN: Results & Visualization */}
-      <div className="xl:col-span-8 space-y-6">
-        {!result ? (
-          <Card className="h-full min-h-[500px] flex flex-col items-center justify-center text-center border-dashed border-2 bg-transparent shadow-none">
-            <Truck className="h-16 w-16 text-muted-foreground opacity-20 mb-4" />
-            <h2 className="text-2xl font-bold text-muted-foreground opacity-50">Ready for Load Plan</h2>
-            <p className="text-muted-foreground opacity-50 mt-2 max-w-sm">
-              Enter quantities on the left to instantly calculate truck fit, stacks required, and remaining space.
-            </p>
-          </Card>
-        ) : (
-          <>
-            {/* BIG VERDICT BANNER */}
-            <div className={cn(
-              "rounded-xl border-2 p-6 flex flex-col md:flex-row items-center justify-between gap-6 transition-colors shadow-sm relative overflow-hidden",
-              result.fits 
-                ? "bg-green-500/10 border-green-500/30 text-green-900 dark:text-green-400" 
-                : "bg-destructive/10 border-destructive/30 text-destructive-foreground dark:text-red-400"
-            )}>
-              {/* Status Indicator */}
-              <div className="flex items-center gap-4 z-10">
-                {result.fits ? (
-                  <CheckCircle2 className="h-12 w-12 text-green-600 dark:text-green-500 shrink-0" />
-                ) : (
-                  <AlertTriangle className="h-12 w-12 text-destructive shrink-0" />
-                )}
-                <div>
-                  <h1 className="text-4xl md:text-5xl font-black tracking-tight uppercase">
-                    {result.fits ? "Fits" : "Doesn't Fit"}
-                  </h1>
-                  <p className="text-lg font-medium opacity-80 uppercase tracking-widest mt-1">
-                    {result.trucksNeeded === 1 
-                      ? "In 1 standard 53' trailer" 
-                      : `Requires ${result.trucksNeeded} trailers`}
-                  </p>
-                </div>
-              </div>
-
-              {/* Big Capacity Number */}
-              <div className="text-right z-10 bg-background/50 backdrop-blur-sm rounded-lg p-4 border shadow-sm min-w-[200px]">
-                <div className="text-sm font-bold uppercase tracking-wider opacity-70 mb-1">Capacity Used</div>
-                <div className={cn(
-                  "text-5xl font-black font-mono tracking-tighter",
-                  result.capacityUsedPct > 100 ? "text-destructive" : ""
-                )}>
-                  {result.capacityUsedPct.toFixed(1)}<span className="text-3xl">%</span>
-                </div>
-              </div>
-
-              {/* Partial truck flag */}
-              {(() => {
-                const lastTruckPct = result.capacityUsedPct - (result.trucksNeeded - 1) * 100;
-                const isPartial = result.trucksNeeded > 0 && lastTruckPct < 99.995;
-                if (!isPartial) return null;
-                return (
-                  <div className="absolute top-0 left-0 right-0 z-10 flex justify-center">
-                    <span className="inline-flex items-center gap-1.5 rounded-b-md bg-amber-500 text-amber-950 px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-sm">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      Partial truck — {result.trucksNeeded > 1 ? `trailer ${result.trucksNeeded} ` : ""}only {lastTruckPct.toFixed(1)}% full
-                    </span>
-                  </div>
-                );
-              })()}
-
-              {/* Loading State Overlay */}
-              {isCalculating && (
-                <div className="absolute inset-0 bg-background/50 backdrop-blur-[2px] z-20 flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent"></div>
+                    );
+                  })}
                 </div>
               )}
-            </div>
 
-            {/* VISUAL DIAGRAM */}
-            <Card className="overflow-hidden border-border shadow-sm">
-              <CardHeader className="bg-muted/30 border-b py-4">
-                <CardTitle className="text-lg">Trailer Visualization</CardTitle>
-              </CardHeader>
-              <CardContent className="p-6 bg-[#f8f9fa] dark:bg-[#0a0a0a]">
-                <TruckDiagram result={result} items={items} />
-              </CardContent>
+              <div className="p-4 bg-muted/30 border-t flex flex-col gap-2">
+                {currentLines.length > 0 && (
+                  <Button
+                    className="w-full"
+                    onClick={handleOpenSaveDialog}
+                    disabled={isSaving}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {activePlan ? "Update Plan" : "Save Plan"}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  className="w-full text-muted-foreground"
+                  onClick={handleClearAll}
+                >
+                  Clear All
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* RIGHT COLUMN: Results & Visualization */}
+        <div className="xl:col-span-8 space-y-6">
+          {!result ? (
+            <Card className="h-full min-h-[500px] flex flex-col items-center justify-center text-center border-dashed border-2 bg-transparent shadow-none">
+              <Truck className="h-16 w-16 text-muted-foreground opacity-20 mb-4" />
+              <h2 className="text-2xl font-bold text-muted-foreground opacity-50">
+                Ready for Load Plan
+              </h2>
+              <p className="text-muted-foreground opacity-50 mt-2 max-w-sm">
+                Enter quantities on the left to instantly calculate truck fit,
+                stacks required, and remaining space.
+              </p>
             </Card>
+          ) : (
+            <>
+              {/* BIG VERDICT BANNER */}
+              <div
+                className={cn(
+                  "rounded-xl border-2 p-6 flex flex-col md:flex-row items-center justify-between gap-6 transition-colors shadow-sm relative overflow-hidden",
+                  result.fits
+                    ? "bg-green-500/10 border-green-500/30 text-green-900 dark:text-green-400"
+                    : "bg-destructive/10 border-destructive/30 text-destructive-foreground dark:text-red-400"
+                )}
+              >
+                {/* Status Indicator */}
+                <div className="flex items-center gap-4 z-10">
+                  {result.fits ? (
+                    <CheckCircle2 className="h-12 w-12 text-green-600 dark:text-green-500 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="h-12 w-12 text-destructive shrink-0" />
+                  )}
+                  <div>
+                    <h1 className="text-4xl md:text-5xl font-black tracking-tight uppercase">
+                      {result.fits ? "Fits" : "Doesn't Fit"}
+                    </h1>
+                    <p className="text-lg font-medium opacity-80 uppercase tracking-widest mt-1">
+                      {result.trucksNeeded === 1
+                        ? "In 1 standard 53' trailer"
+                        : `Requires ${result.trucksNeeded} trailers`}
+                    </p>
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* LINE ITEMS BREAKDOWN */}
-              <Card className="border-border shadow-sm">
-                <CardHeader className="py-4 border-b">
-                  <CardTitle className="text-lg">Load Breakdown</CardTitle>
+                {/* Big Capacity Number */}
+                <div className="text-right z-10 bg-background/50 backdrop-blur-sm rounded-lg p-4 border shadow-sm min-w-[200px]">
+                  <div className="text-sm font-bold uppercase tracking-wider opacity-70 mb-1">
+                    Capacity Used
+                  </div>
+                  <div
+                    className={cn(
+                      "text-5xl font-black font-mono tracking-tighter",
+                      result.capacityUsedPct > 100 ? "text-destructive" : ""
+                    )}
+                  >
+                    {result.capacityUsedPct.toFixed(1)}
+                    <span className="text-3xl">%</span>
+                  </div>
+                </div>
+
+                {/* Partial truck flag */}
+                {(() => {
+                  const lastTruckPct = result.capacityUsedPct - (result.trucksNeeded - 1) * 100;
+                  const isPartial = result.trucksNeeded > 0 && lastTruckPct < 99.995;
+                  if (!isPartial) return null;
+                  return (
+                    <div className="absolute top-0 left-0 right-0 z-10 flex justify-center">
+                      <span className="inline-flex items-center gap-1.5 rounded-b-md bg-amber-500 text-amber-950 px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-sm">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        Partial truck — {result.trucksNeeded > 1 ? `trailer ${result.trucksNeeded} ` : ""}only {lastTruckPct.toFixed(1)}% full
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                {/* Loading State Overlay */}
+                {isCalculating && (
+                  <div className="absolute inset-0 bg-background/50 backdrop-blur-[2px] z-20 flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent" />
+                  </div>
+                )}
+              </div>
+
+              {/* VISUAL DIAGRAM */}
+              <Card className="overflow-hidden border-border shadow-sm">
+                <CardHeader className="bg-muted/30 border-b py-4">
+                  <CardTitle className="text-lg">Trailer Visualization</CardTitle>
                 </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader className="bg-muted/30">
-                      <TableRow>
-                        <TableHead>Item</TableHead>
-                        <TableHead className="text-right">Units</TableHead>
-                        <TableHead className="text-right">Stacks</TableHead>
-                        <TableHead className="text-right">Space</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {result.lines.map((line: any) => (
-                        <TableRow key={line.itemId}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: line.color }} />
-                              <span className="font-bold">{line.itemName}</span>
-                              {line.roundedUp && (
-                                <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-500 ml-1 uppercase" title={`Rounded up to ${line.roundedUpTo} units to make full stacks`}>
-                                  Rounded UP
-                                </span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-mono font-medium">
-                            {line.quantity}
-                          </TableCell>
-                          <TableCell className="text-right font-mono font-bold">
-                            {line.stacksNeeded}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {line.capacityFractionPct.toFixed(1)}%
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <CardContent className="p-6 bg-[#f8f9fa] dark:bg-[#0a0a0a]">
+                  <TruckDiagram result={result} items={items} />
                 </CardContent>
               </Card>
 
-              {/* REMAINING ROOM */}
-              <Card className="border-border shadow-sm">
-                <CardHeader className="py-4 border-b">
-                  <CardTitle className="text-lg">To Fill the Truck</CardTitle>
-                  <CardDescription>
-                    How much more of each type would fill the remaining space (pick one type)
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-0">
-                  {result.remainingRoom.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* LINE ITEMS BREAKDOWN */}
+                <Card className="border-border shadow-sm">
+                  <CardHeader className="py-4 border-b">
+                    <CardTitle className="text-lg">Load Breakdown</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
                     <Table>
                       <TableHeader className="bg-muted/30">
                         <TableRow>
                           <TableHead>Item</TableHead>
-                          <TableHead className="text-right">Stacks Needed</TableHead>
-                          <TableHead className="text-right">Units Needed</TableHead>
+                          <TableHead className="text-right">Units</TableHead>
+                          <TableHead className="text-right">Stacks</TableHead>
+                          <TableHead className="text-right">Space</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {result.remainingRoom.map((room: any) => (
-                          <TableRow key={room.itemId}>
-                            <TableCell className="font-bold">{room.itemName}</TableCell>
-                            <TableCell className="text-right font-mono text-green-600 dark:text-green-400 font-bold">
-                              +{room.stacks}
+                        {result.lines.map((line: any) => (
+                          <TableRow key={line.itemId}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="w-3 h-3 rounded-sm"
+                                  style={{ backgroundColor: line.color }}
+                                />
+                                <span className="font-bold">{line.itemName}</span>
+                                {line.roundedUp && (
+                                  <span
+                                    className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-500 ml-1 uppercase"
+                                    title={`Rounded up to ${line.roundedUpTo} units to make full stacks`}
+                                  >
+                                    Rounded UP
+                                  </span>
+                                )}
+                              </div>
                             </TableCell>
-                            <TableCell className="text-right font-mono text-muted-foreground">
-                              +{room.units}
+                            <TableCell className="text-right font-mono font-medium">
+                              {line.quantity}
+                            </TableCell>
+                            <TableCell className="text-right font-mono font-bold">
+                              {line.stacksNeeded}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">
+                              {line.capacityFractionPct.toFixed(1)}%
                             </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
-                  ) : (
-                    <div className="p-8 text-center text-muted-foreground flex flex-col items-center">
-                      <CheckCircle2 className="h-8 w-8 mb-2 opacity-20" />
-                      <p className="font-bold uppercase tracking-widest text-sm">Truck is 100% Full</p>
-                      <p className="text-sm opacity-70">No additional full stacks can fit.</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </>
-        )}
+                  </CardContent>
+                </Card>
+
+                {/* TO FILL THE TRUCK */}
+                <Card className="border-border shadow-sm">
+                  <CardHeader className="py-4 border-b">
+                    <CardTitle className="text-lg">To Fill the Truck</CardTitle>
+                    <CardDescription>
+                      How much more of each type would fill the remaining space (pick one type)
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {result.remainingRoom.length > 0 ? (
+                      <Table>
+                        <TableHeader className="bg-muted/30">
+                          <TableRow>
+                            <TableHead>Item</TableHead>
+                            <TableHead className="text-right">Stacks Needed</TableHead>
+                            <TableHead className="text-right">Units Needed</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {result.remainingRoom.map((room: any) => (
+                            <TableRow key={room.itemId}>
+                              <TableCell className="font-bold">
+                                {room.itemName}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-green-600 dark:text-green-400 font-bold">
+                                +{room.stacks}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-muted-foreground">
+                                +{room.units}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <div className="p-8 text-center text-muted-foreground flex flex-col items-center">
+                        <CheckCircle2 className="h-8 w-8 mb-2 opacity-20" />
+                        <p className="font-bold uppercase tracking-widest text-sm">
+                          Truck is 100% Full
+                        </p>
+                        <p className="text-sm opacity-70">
+                          No additional full stacks can fit.
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Save Plan Dialog */}
+      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {activePlan ? "Rename / Update Plan" : "Save Load Plan"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className="text-sm font-medium">Plan Name / Order Ref</label>
+            <Input
+              autoFocus
+              placeholder="e.g. Smith Order #1042"
+              value={planName}
+              onChange={(e) => setPlanName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSave();
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Give this load a name so it can be found later and shared with
+              others.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSaveDialogOpen(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={!planName.trim() || isSaving}
+            >
+              <Save className="h-4 w-4 mr-2" />
+              {isSaving ? "Saving..." : activePlan ? "Update" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
-
 // Visual diagram of the truck(s)
-function TruckDiagram({ result, items }: { result: any, items: any[] }) {
+function TruckDiagram({ result, items }: { result: any; items: any[] }) {
   if (!result || !result.lines) return null;
 
-  // Render one truck box for each truck needed
   const trucks = Array.from({ length: result.trucksNeeded }).map((_, i) => i);
-  
-  // Flatten all stacks into an array so we can place them sequentially
-  const allStacks: { itemId: number, color: string, name: string }[] = [];
-  result.lines.forEach((line: any) => {
-    for (let i = 0; i < line.stacksNeeded; i++) {
-      allStacks.push({
-        itemId: line.itemId,
-        color: line.color,
-        name: line.itemName
-      });
-    }
-  });
 
   return (
     <div className="space-y-8">
-      {trucks.map(truckIndex => {
-        // Find which stacks go into this truck
-        // A stack takes exactly (1 / stacksPerTruck) of a truck.
-        // We will just slice the stacks. Wait, different items have different stack sizes.
-        // It's easier to just represent the capacity sequentially.
-        // Let's calculate the cumulative capacity to determine truck breaks.
-        
-        let currentTruckStacks: typeof allStacks = [];
-        let capSoFar = 0;
-        let truckStartCap = truckIndex * 100;
-        let truckEndCap = (truckIndex + 1) * 100;
-        
-        let localCap = 0; // capacity within this truck
+      {trucks.map((truckIndex) => (
+        <div key={truckIndex} className="relative">
+          <div className="flex justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
+            <span>Front</span>
+            <span>
+              Trailer {truckIndex + 1} of {result.trucksNeeded}
+            </span>
+            <span>Rear doors</span>
+          </div>
 
-        // Because we don't have the exact bin-packing algorithm, we'll approximate the visuals 
-        // by grouping stacks and sizing them by their fraction.
-        // Actually, let's just render the lines mapped to width percentages.
-        
-        return (
-          <div key={truckIndex} className="relative">
-            <div className="flex justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-              <span>Front</span>
-              <span>Trailer {truckIndex + 1} of {result.trucksNeeded}</span>
-              <span>Rear doors</span>
+          {/* The Truck Box */}
+          <div className="h-32 border-4 border-slate-800 dark:border-slate-300 rounded-r-lg relative overflow-hidden bg-white dark:bg-black shadow-inner">
+            {/* Cab indicator */}
+            <div className="absolute -left-4 top-0 bottom-0 w-4 bg-slate-800 dark:bg-slate-300" />
+
+            <div className="absolute inset-0 flex">
+              <TruckContents
+                result={result}
+                truckIndex={truckIndex}
+                items={items}
+              />
             </div>
-            
-            {/* The Truck Box */}
-            <div className="h-32 border-4 border-slate-800 dark:border-slate-300 rounded-r-lg relative overflow-hidden bg-white dark:bg-black shadow-inner">
-              {/* Cab indicator */}
-              <div className="absolute -left-4 top-0 bottom-0 w-4 bg-slate-800 dark:bg-slate-300" />
-              
-              <div className="absolute inset-0 flex">
-                {/* Render the sections for this specific truck */}
-                <TruckContents 
-                  result={result} 
-                  truckIndex={truckIndex} 
-                  items={items} 
+
+            {/* Empty space flag on the last (partial) trailer */}
+            {truckIndex === result.trucksNeeded - 1 && (() => {
+              const lastTruckPct = result.capacityUsedPct - (result.trucksNeeded - 1) * 100;
+              const emptyPct = 100 - lastTruckPct;
+              if (emptyPct < 0.005) return null;
+              return (
+                <div
+                  className="absolute top-0 bottom-0 right-0 flex items-center justify-center"
+                  style={{
+                    width: `${emptyPct}%`,
+                    backgroundImage:
+                      "repeating-linear-gradient(45deg, rgba(245,158,11,0.25) 0, rgba(245,158,11,0.25) 6px, transparent 6px, transparent 12px)",
+                  }}
+                  title={`Empty space: ${emptyPct.toFixed(1)}% of this trailer`}
+                >
+                  {emptyPct > 12 && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500 bg-background/70 px-1.5 py-0.5 rounded">
+                      {emptyPct.toFixed(0)}% empty
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Grid lines (10% marks) */}
+            <div className="absolute inset-0 pointer-events-none opacity-20">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="absolute h-full w-px bg-slate-500"
+                  style={{ left: `${i * 10}%` }}
                 />
-              </div>
-
-              {/* Empty space flag on the last (partial) trailer */}
-              {truckIndex === result.trucksNeeded - 1 && (() => {
-                const lastTruckPct = result.capacityUsedPct - (result.trucksNeeded - 1) * 100;
-                const emptyPct = 100 - lastTruckPct;
-                if (emptyPct < 0.005) return null;
-                return (
-                  <div
-                    className="absolute top-0 bottom-0 right-0 flex items-center justify-center"
-                    style={{
-                      width: `${emptyPct}%`,
-                      backgroundImage:
-                        "repeating-linear-gradient(45deg, rgba(245,158,11,0.25) 0, rgba(245,158,11,0.25) 6px, transparent 6px, transparent 12px)",
-                    }}
-                    title={`Empty space: ${emptyPct.toFixed(1)}% of this trailer`}
-                  >
-                    {emptyPct > 12 && (
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500 bg-background/70 px-1.5 py-0.5 rounded">
-                        {emptyPct.toFixed(0)}% empty
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Grid lines (10% marks) */}
-              <div className="absolute inset-0 pointer-events-none opacity-20">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i} className="absolute h-full w-px bg-slate-500" style={{ left: `${i * 10}%` }} />
-                ))}
-              </div>
-            </div>
-            
-            {/* Wheels */}
-            <div className="flex justify-end gap-2 pr-12 mt-1">
-              <div className="w-8 h-8 rounded-full bg-slate-800 dark:bg-slate-300 border-2 border-background" />
-              <div className="w-8 h-8 rounded-full bg-slate-800 dark:bg-slate-300 border-2 border-background" />
+              ))}
             </div>
           </div>
-        );
-      })}
+
+          {/* Wheels */}
+          <div className="flex justify-end gap-2 pr-12 mt-1">
+            <div className="w-8 h-8 rounded-full bg-slate-800 dark:bg-slate-300 border-2 border-background" />
+            <div className="w-8 h-8 rounded-full bg-slate-800 dark:bg-slate-300 border-2 border-background" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function TruckContents({ result, truckIndex, items }: { result: any, truckIndex: number, items: any[] }) {
-  // To draw the contents accurately across multiple trucks without a real 2D bin packer,
-  // we treat capacity as a continuous linear strip from 0 to capacityUsedPct.
-  // Then for truckIndex N, we only render the portion of the strip that falls between N*100 and (N+1)*100.
-  
+function TruckContents({
+  result,
+  truckIndex,
+  items,
+}: {
+  result: any;
+  truckIndex: number;
+  items: any[];
+}) {
   const blocks: React.ReactNode[] = [];
-  let currentPos = 0; // 0 to capacityUsedPct
-  
+  let currentPos = 0;
+
   const truckStart = truckIndex * 100;
   const truckEnd = (truckIndex + 1) * 100;
 
   result.lines.forEach((line: any) => {
     const itemDef = items.find((i: any) => i.id === line.itemId);
     if (!itemDef) return;
-    
-    // Size of one stack in percentage of one truck
+
     const stackPct = (1 / itemDef.stacksPerTruck) * 100;
-    
+
     for (let i = 0; i < line.stacksNeeded; i++) {
       const stackStart = currentPos;
       const stackEnd = currentPos + stackPct;
-      
-      // Check if this stack overlaps with this truck
+
       if (stackEnd > truckStart && stackStart < truckEnd) {
-        // It's in this truck!
-        // Calculate its left and width relative to THIS truck (0 to 100)
         const leftInTruck = Math.max(0, stackStart - truckStart);
         const rightInTruck = Math.min(100, stackEnd - truckStart);
         const widthInTruck = rightInTruck - leftInTruck;
-        
+
         blocks.push(
-          <div 
+          <div
             key={`${line.itemId}-${i}`}
             className="absolute top-0 bottom-0 border-r border-background/20 hover:opacity-90 transition-opacity flex items-center justify-center group"
-            style={{ 
-              left: `${leftInTruck}%`, 
+            style={{
+              left: `${leftInTruck}%`,
               width: `${widthInTruck}%`,
-              backgroundColor: line.color 
+              backgroundColor: line.color,
             }}
-            title={`${line.itemName} (Stack ${i+1})`}
+            title={`${line.itemName} (Stack ${i + 1})`}
           >
-            {/* Tooltip on hover is handled natively via title for simplicity, but we can add an inner visual */}
             {widthInTruck > 2 && (
               <span className="opacity-0 group-hover:opacity-100 text-[10px] font-bold text-white bg-black/50 px-1 rounded truncate pointer-events-none">
                 {line.itemName}
@@ -512,7 +748,7 @@ function TruckContents({ result, truckIndex, items }: { result: any, truckIndex:
           </div>
         );
       }
-      
+
       currentPos += stackPct;
     }
   });
